@@ -1,0 +1,668 @@
+---
+title: "Intercoder reliability"
+author: "Jacob Aarup Dalsgaard"
+date: "7/12/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+#
+```{r}
+#Loading packages
+library(pacman)
+p_load(tidyverse, brms, bayesplot, caret)
+
+#Loading Data and performance matrics
+load("Error_dataset_incl_true.rda")
+perf <- read_csv("all_performancemetrics.csv") %>% 
+  mutate(
+    language = ifelse(str_detect(.$model, "dk"), "Danish", "Norwegian"),
+    model_type = str_remove(.$model, "dk|no")
+  )
+
+
+#F1 formula
+lang_formula <- bf(F1 ~ 0 + model, family = "beta")
+
+
+get_prior(lang_formula, data = perf)
+
+
+priors_beta <- c(
+  prior(normal(0,1), class = b),
+  prior(normal(100,50), class = phi)
+)
+#mean model priors
+mean_beta_0_prior <- brm(
+  lang_formula, 
+  prior = priors_beta,
+  data = perf,
+  cores = 4,
+  sample_prior = "only",
+  control = list(adapt_delta = 0.8)
+)
+pp_check(mean_beta_0_prior, nsamples = 100)
+
+
+#inspecting chains
+mcmc_trace(mean_beta_0_prior, pars = c("b_modelbc_dk_bert", "b_modelbc_no_bert", "b_modelbcdk",
+                                       "b_modelbcdk_prev", "b_modelbcno", "b_modelbcno_prev"))
+
+#mean model posteriors
+mean_beta_0_posterior <- brm(
+  lang_formula, 
+  prior = priors_beta,
+  data = perf,
+  cores = 4,
+  sample_prior = T,
+  control = list(adapt_delta = 0.8)
+)
+
+pp_check(mean_beta_0_posterior, nsamples = 100)
+
+# predictive checks
+F1_PP_plot <- gridExtra::grid.arrange(
+         pp_check(mean_beta_0_prior, nsamples = 100)+
+           ggtitle("Prior predictive check for F1"),
+         pp_check(mean_beta_0_posterior, nsamples = 100)+
+           ggtitle("Posterior predictive check for F1"),
+         ncol = 2)
+
+ggsave("plots/PP_checks_F1.png", plot = F1_PP_plot, device = "png")
+
+#inspecting chains
+mcmc_trace(mean_beta_0_posterior, pars = c("b_modelbc_dk_bert", "b_modelbc_no_bert", "b_modelbcdk",
+                                       "b_modelbcdk_prev", "b_modelbcno", "b_modelbcno_prev"))+
+  ggtitle("Posterior Markov Chain Monte Carlo trace plots, F1")
+ggsave("plots/MCMC_trace_F1.png", device = "png")
+
+#model summary
+summary(mean_beta_0_posterior)
+post <- posterior_samples(mean_beta_0_posterior)
+
+
+#Plotting
+mcmc_intervals(post[, c(3,4,1,5,6,2)], 
+               prob = .5,
+               point_est = "median") +
+  labs(title = "F1 estimates plot", subtitle = "Estimates on logit scale" ) +
+  theme(axis.text.y  = element_text(hjust = 0),
+        axis.line.x  = element_line(size = 1/4),
+        axis.line.y  = element_blank(),
+        axis.ticks.y = element_blank())
+
+
+#hypothesis testing
+plot((hypothesis(mean_beta_0_posterior, c("modelbcno - modelbcdk > 0",
+                                    "modelbcno_prev - modelbcdk_prev > 0",
+                                    "modelbc_no_bert - modelbc_dk_bert < 0"))))
+
+hypothesis(mean_beta_0_posterior, c("modelbcdk_prev - modelbcdk > 0",
+                                    "modelbc_dk_bert - modelbcdk_prev > 0",
+                                    "modelbc_dk_bert - modelbcdk > 0"))
+
+
+hypothesis(mean_beta_0_posterior, c("modelbcno_prev - modelbcno > 0",
+                                    "modelbc_no_bert - modelbcno_prev > 0",
+                                    "modelbc_no_bert - modelbcno > 0")) 
+
+#plotting model effects
+conditional_effects(mean_beta_0_posterior)
+
+
+#kappa model
+kappa_lang_formula <- bf(Kappa ~ 0 + model, family = "beta")
+
+get_prior(kappa_lang_formula, data = perf)
+
+priors_beta <- c(
+  prior(normal(0,1), class = b),
+  prior(normal(100,50), class = phi)
+)
+#mean model priors
+kappa_mean_beta_0_prior <- brm(
+  kappa_lang_formula, 
+  prior = priors_beta,
+  data = perf,
+  cores = 4,
+  sample_prior = "only",
+  control = list(adapt_delta = 0.8)
+)
+
+
+#prior predictive check
+pp_check(kappa_mean_beta_0_prior, nsamples = 100)
+
+#inspecting chains
+mcmc_trace(kappa_mean_beta_0_prior)
+
+#mean model posteriors
+kappa_mean_beta_0_posterior <- brm(
+  kappa_lang_formula, 
+  prior = priors_beta,
+  data = perf,
+  cores = 4,
+  sample_prior = T,
+  control = list(adapt_delta = 0.9)
+)
+
+# predictive checks
+kappa_PP_plot <- gridExtra::grid.arrange(
+  pp_check(kappa_mean_beta_0_prior, nsamples = 100)+
+    ggtitle("Prior predictive check for Kappa"),
+  pp_check(kappa_mean_beta_0_posterior, nsamples = 100)+
+    ggtitle("Posterior predictive check for Kappa"),
+  ncol = 2)
+
+ggsave("plots/PP_checks_Kappa.png", plot = kappa_PP_plot, device = "png")
+
+#inspecting chains
+mcmc_trace(kappa_mean_beta_0_posterior, pars = c("b_modelbc_dk_bert", "b_modelbc_no_bert", "b_modelbcdk",
+                                       "b_modelbcdk_prev", "b_modelbcno", "b_modelbcno_prev"))+
+  ggtitle("Posterior Markov Chain Monte Carlo trace plots, Kappa")
+ggsave("plots/MCMC_trace_Kappa.png", device = "png")
+
+#model summary
+summary(kappa_mean_beta_0_posterior)
+
+
+kappa_post <- posterior_samples(kappa_mean_beta_0_posterior)
+
+#Plotting
+mcmc_intervals(kappa_post[, c(3,4,1,5,6,2)], 
+               prob = .5,
+               point_est = "median") +
+  labs(title = "Kappa estimates plot", subtitle = "Estimates on logit scale" ) +
+  theme(axis.text.y  = element_text(hjust = 0),
+        axis.line.x  = element_line(size = 1/4),
+        axis.line.y  = element_blank(),
+        axis.ticks.y = element_blank())
+
+
+#hypothesis testing
+hypothesis(kappa_mean_beta_0_posterior, c("modelbcno - modelbcdk > 0",
+                                    "modelbcno_prev - modelbcdk_prev > 0",
+                                    "modelbc_no_bert - modelbc_dk_bert < 0"))
+
+hypothesis(kappa_mean_beta_0_posterior, c("modelbcdk_prev - modelbcdk > 0",
+                                    "modelbc_dk_bert - modelbcdk_prev > 0",
+                                    "modelbc_dk_bert - modelbcdk > 0"))
+
+
+hypothesis(kappa_mean_beta_0_posterior, c("modelbcno_prev - modelbcno > 0",
+                                    "modelbc_no_bert - modelbcno_prev < 0",
+                                    "modelbc_no_bert - modelbcno < 0"))
+
+#plotting model effects
+conditional_effects(mean_beta_0_posterior)
+#adding IC criteria
+mean_beta_0_posterior <- add_criterion(mean_beta_0_posterior, "loo", reloo = T)
+mean_beta_0_posterior <- add_criterion(mean_beta_0_posterior, "waic")
+```
+
+```{r}
+#Loading and creating error analysis dataset for modeling
+df_list <- list(model1_errors_dk,model1_errors_no, model2_errors_dk, model2_errors_no, modelbert_errors_dk, modelbert_errors_no)
+errors <- c("model1_errors_dk","model1_errors_no", "model2_errors_dk", "model2_errors_no", "modelbert_errors_dk", "modelbert_errors_no")
+load("Error_dataset_incl_true.rda")
+
+#Mutating to include language discriminators
+no_bc_err <- no_bc_err %>% 
+  pivot_longer(cols = c(err_cat, err_cat_M2, err_cat_bert), 
+               names_to = "model",
+               values_to = "err_cat") %>% 
+  mutate(model = paste("no", model, sep = "_"))
+
+dk_bc_err <- dk_bc_err %>% 
+  pivot_longer(cols = c(err_cat, err_cat_M2, err_cat_bert), 
+               names_to = "model",
+               values_to = "err_cat") %>% 
+  mutate(model = paste("dk", model, sep = "_"))
+
+#Binding all errors
+error_df <- bind_rows(no_bc_err, dk_bc_err)
+
+for (i in unique(error_df$err_cat)){
+  error_df[,paste0(i)]=ifelse(error_df$err_cat==i,1,0)
+}
+
+error_df <- error_df %>% 
+  mutate(
+    language = ifelse(str_detect(.$model, "dk"), "Danish", "Norwegian"),
+    model_type = str_remove(.$model, "dk|no"),
+    fold_real = paste(model, .folds, sep = "_")
+  )
+
+
+
+#Important words, error occurence
+imp_word_formula <- bf(imp_word ~ 0 + model_type:language + (1|fold_real), family = "bernoulli")
+
+
+get_prior(imp_word_formula, data = error_df)
+
+priors_beta <- c(
+  prior(normal(0,10), class = b)
+)
+#mean model priors
+imp_beta_0_prior <- brm(
+  imp_word_formula, 
+  prior = priors_beta,
+  data = error_df,
+  cores = 4,
+  sample_prior = "only",
+  control = list(adapt_delta = 0.8)
+)
+
+#prior predictive check
+pp_check(imp_beta_0_prior, nsamples = 100)
+
+#inspecting chains
+mcmc_trace(imp_beta_0_prior)
+
+#mean model posteriors
+imp_beta_0_posterior <- brm(
+  imp_word_formula, 
+  prior = priors_beta,
+  data = error_df,
+  cores = 4,
+  sample_prior = T,
+  control = list(adapt_delta = 0.8),
+  warmup = 2000, iter = 4000
+)
+
+#posterior predictive check
+pp_check(imp_beta_0_posterior, nsamples = 100) 
+
+
+#inspecting chains
+mcmc_trace(imp_beta_0_posterior)
+
+
+#Other false positives, error occurence
+other_fp_formula <- bf(other_fp ~ 0 + model_type:language + (1|fold_real), family = "bernoulli")
+
+
+get_prior(other_fp_formula, data = error_df)
+
+priors_beta <- c(
+  prior(normal(0,10), class = b)
+)
+#mean model priors
+other_fp_beta_0_prior <- brm(
+  other_fp_formula, 
+  prior = priors_beta,
+  data = error_df,
+  cores = 4,
+  sample_prior = "only",
+  control = list(adapt_delta = 0.8)
+)
+
+#prior predictive check
+pp_check(other_fp_beta_0_prior, nsamples = 100)
+
+#inspecting chains
+mcmc_trace(other_fp_beta_0_prior)
+
+#mean model posteriors
+other_fp_beta_0_posterior <- brm(
+  other_fp_formula, 
+  prior = priors_beta,
+  data = error_df,
+  cores = 4,
+  sample_prior = T,
+  control = list(adapt_delta = 0.8),
+  warmup = 2000, iter = 4000
+)
+
+#posterior predictive check
+pp_check(other_fp_beta_0_posterior, nsamples = 100) 
+
+
+#inspecting chains
+mcmc_trace(other_fp_beta_0_posterior)
+
+#model summary
+summary(other_fp_beta_0_posterior)
+
+
+#laugh false positives, error occurence
+laugh_fp_formula <- bf(laugh_fp ~ 0 + model_type:language + (1|fold_real), family = "bernoulli")
+
+
+get_prior(laugh_fp_formula, data = error_df)
+
+priors_beta <- c(
+  prior(normal(0,10), class = b)
+)
+#mean model priors
+laugh_fp_beta_0_prior <- brm(
+  laugh_fp_formula, 
+  prior = priors_beta,
+  data = error_df,
+  cores = 4,
+  sample_prior = "only",
+  control = list(adapt_delta = 0.8)
+)
+
+#prior predictive check
+pp_check(laugh_fp_beta_0_prior, nsamples = 100)
+
+#inspecting chains
+mcmc_trace(laugh_fp_beta_0_prior)
+
+#mean model posteriors
+laugh_fp_beta_0_posterior <- brm(
+  laugh_fp_formula, 
+  prior = priors_beta,
+  data = error_df,
+  cores = 4,
+  sample_prior = T,
+  control = list(adapt_delta = 0.8),
+  warmup = 2000, iter = 4000
+)
+
+#posterior predictive check
+pp_check(laugh_fp_beta_0_posterior, nsamples = 100) 
+
+
+#inspecting chains
+mcmc_trace(laugh_fp_beta_0_posterior)
+
+#model summary
+summary(laugh_fp_beta_0_posterior)
+
+
+#Other, error occurence
+other_formula <- bf(other ~ 0 + model_type:language + (1|fold_real), family = "bernoulli")
+
+
+get_prior(other_formula, data = error_df)
+
+priors_beta <- c(
+  prior(normal(0,10), class = b)
+)
+#mean model priors
+other_beta_0_prior <- brm(
+  other_formula, 
+  prior = priors_beta,
+  data = error_df,
+  cores = 4,
+  sample_prior = "only",
+  control = list(adapt_delta = 0.8)
+)
+
+#prior predictive check
+pp_check(other_beta_0_prior, nsamples = 100)
+
+#inspecting chains
+mcmc_trace(other_beta_0_prior)
+
+#mean model posteriors
+other_beta_0_posterior <- brm(
+  other_formula, 
+  prior = priors_beta,
+  data = error_df,
+  cores = 4,
+  sample_prior = T,
+  control = list(adapt_delta = 0.8),
+  warmup = 2000, iter = 4000
+)
+
+#posterior predictive check
+pp_check(other_beta_0_posterior, nsamples = 100) 
+
+#inspecting chains
+mcmc_trace(other_beta_0_posterior)
+
+#model summary
+summary(other_beta_0_posterior)
+
+
+
+#laugh, error occurence
+laugh_formula <- bf(laugh ~ 0 + model_type:language + (1|fold_real), family = "bernoulli")
+
+
+get_prior(laugh_formula, data = error_df)
+
+priors_beta <- c(
+  prior(normal(0,10), class = b)
+)
+#mean model priors
+laugh_beta_0_prior <- brm(
+  laugh_formula, 
+  prior = priors_beta,
+  data = error_df,
+  cores = 4,
+  sample_prior = "only",
+  control = list(adapt_delta = 0.8)
+)
+
+#prior predictive check
+pp_check(laugh_beta_0_prior, nsamples = 100)
+
+#inspecting chains
+mcmc_trace(laugh_beta_0_prior)
+
+#mean model posteriors
+laugh_beta_0_posterior <- brm(
+  laugh_formula, 
+  prior = priors_beta,
+  data = error_df,
+  cores = 4,
+  sample_prior = T,
+  control = list(adapt_delta = 0.8),
+  warmup = 2000, iter = 4000
+)
+
+#posterior predictive check
+pp_check(laugh_beta_0_posterior, nsamples = 100) 
+
+#inspecting chains
+mcmc_trace(laugh_beta_0_posterior)
+
+#model summary
+summary(laugh_beta_0_posterior)
+
+
+#joint, error occurence
+joint_formula <- bf(joint_trans ~ 0 + model_type:language + (1|fold_real), family = "bernoulli")
+
+
+get_prior(joint_formula, data = error_df)
+
+priors_beta <- c(
+  prior(normal(0,10), class = b)
+)
+#mean model priors
+joint_beta_0_prior <- brm(
+  joint_formula, 
+  prior = priors_beta,
+  data = error_df,
+  cores = 4,
+  sample_prior = "only",
+  control = list(adapt_delta = 0.8)
+)
+
+#prior predictive check
+pp_check(joint_beta_0_prior, nsamples = 100)
+
+#inspecting chains
+mcmc_trace(joint_beta_0_prior)
+
+#mean model posteriors
+joint_beta_0_posterior <- brm(
+  joint_formula, 
+  prior = priors_beta,
+  data = error_df,
+  cores = 4,
+  sample_prior = T,
+  control = list(adapt_delta = 0.8),
+  warmup = 2000, iter = 4000
+)
+
+#posterior predictive check
+pp_check(joint_beta_0_posterior, nsamples = 100) 
+
+#inspecting chains
+mcmc_trace(joint_beta_0_posterior)
+
+#model summary
+summary(joint_beta_0_posterior)
+
+
+
+#backchannel alignment, error occurence
+bc_align_formula <- bf(bc_alignment ~ 0 + model_type:language + (1|fold_real), family = "bernoulli")
+
+
+get_prior(bc_align_formula, data = error_df)
+
+priors_beta <- c(
+  prior(normal(0,10), class = b)
+)
+#mean model priors
+bc_align_beta_0_prior <- brm(
+  bc_align_formula, 
+  prior = priors_beta,
+  data = error_df,
+  cores = 4,
+  sample_prior = "only",
+  control = list(adapt_delta = 0.8)
+)
+
+#prior predictive check
+pp_check(bc_align_beta_0_prior, nsamples = 100)
+
+#inspecting chains
+mcmc_trace(bc_align_beta_0_prior)
+
+#mean model posteriors
+bc_align_beta_0_posterior <- brm(
+  bc_align_formula, 
+  prior = priors_beta,
+  data = error_df,
+  cores = 4,
+  sample_prior = T,
+  control = list(adapt_delta = 0.8),
+  warmup = 2000, iter = 4000
+)
+
+#posterior predictive check
+pp_check(bc_align_beta_0_posterior, nsamples = 100) 
+
+#inspecting chains
+mcmc_trace(bc_align_beta_0_posterior)
+
+#model summary
+summary(bc_align_beta_0_posterior)
+
+
+
+#backchannel alignment, error occurence
+rare_bc_formula <- bf(rare_bc ~ 0 + model_type:language + (1|fold_real), family = "bernoulli")
+
+
+get_prior(rare_bc_formula, data = error_df)
+
+priors_beta <- c(
+  prior(normal(0,10), class = b)
+)
+#mean model priors
+rare_bc_beta_0_prior <- brm(
+  rare_bc_formula, 
+  prior = priors_beta,
+  data = error_df,
+  cores = 4,
+  sample_prior = "only",
+  control = list(adapt_delta = 0.8)
+)
+
+#prior predictive check
+pp_check(rare_bc_beta_0_prior, nsamples = 100)
+
+#inspecting chains
+mcmc_trace(rare_bc_beta_0_prior)
+
+#mean model posteriors
+rare_bc_beta_0_posterior <- brm(
+  rare_bc_formula, 
+  prior = priors_beta,
+  data = error_df,
+  cores = 4,
+  sample_prior = T,
+  control = list(adapt_delta = 0.8),
+  warmup = 2000, iter = 4000
+)
+
+#posterior predictive check
+pp_check(rare_bc_beta_0_posterior, nsamples = 100) 
+
+
+#inspecting chains
+mcmc_trace(rare_bc_beta_0_posterior)
+
+#model summary
+summary(rare_bc_beta_0_posterior)
+
+feature_list <- list(bc_align_beta_0_posterior, rare_bc_beta_0_posterior, imp_beta_0_posterior,
+                     other_beta_0_posterior, other_fp_beta_0_posterior, joint_beta_0_posterior,
+                     laugh_beta_0_posterior,laugh_fp_beta_0_posterior)
+
+prior_list <- list(bc_align_beta_0_prior, rare_bc_beta_0_prior, imp_beta_0_prior,
+                     other_beta_0_prior, other_fp_beta_0_prior, joint_beta_0_prior,
+                     laugh_beta_0_prior,laugh_fp_beta_0_prior)
+
+error_names <- list("Backchannel alignment errors", "Rare backchannel errors", "Important words errors",
+                    "Other errors", "Other false positive errors", "Joint transcription errors",
+                    "Laugh errors", "Laugh false positive errors")
+
+save(bc_align_beta_0_posterior, rare_bc_beta_0_posterior, imp_beta_0_posterior,
+                     other_beta_0_posterior, other_fp_beta_0_posterior, joint_beta_0_posterior,
+                     laugh_beta_0_posterior,laugh_fp_beta_0_posterior, file = "full_bayesian_error_fits.rda")
+
+
+save(bc_align_beta_0_prior, rare_bc_beta_0_prior, imp_beta_0_prior,
+                     other_beta_0_prior, other_fp_beta_0_prior, joint_beta_0_prior,
+                     laugh_beta_0_prior,laugh_fp_beta_0_prior, file = "prior_bayesian_error_fits.rda")
+
+
+feature_post <- tibble()
+for (i in seq_along(feature_list)){
+  pl <- as.character(feature_list[[i]]$formula)[1] %>% 
+    str_extract_all("[:alnum:]{1,10}")  
+  feature_post <- bind_rows(feature_post, 
+                          posterior_samples(feature_list[[i]]) %>% 
+                            mutate(feature = paste(pl[[1]][1], pl[[1]][2], sep = "_")))
+}
+
+write_csv(feature_post, "feature_posteriors.csv")
+
+
+for (i in seq_along(feature_list)){
+PP_plot <- gridExtra::grid.arrange(
+         pp_check(prior_list[[i]], nsamples = 100)+
+           ggtitle("Prior predictive check", paste(error_names[[i]], sep = "")),
+         pp_check(feature_list[[i]], nsamples = 100)+
+           ggtitle("Posterior predictive check", paste(error_names[[i]], sep = "")),
+         ncol = 2)
+ggsave(paste("plots/PP_checks_", str_replace_all(error_names[i], " ", "_"), ".png", sep = ""),
+       plot = PP_plot, device = "png")
+
+
+}
+
+
+MCMC_plot <- mcmc_trace(feature_list[[i]], pars =
+                           c("b_model_type_err_cat:languageDanish","b_model_type_err_cat_bert:languageDanish",
+                             "b_model_type_err_cat_M2:languageDanish","b_model_type_err_cat:languageNorwegian",
+                             "b_model_type_err_cat_bert:languageNorwegian",
+                             "b_model_type_err_cat_M2:languageNorwegian","sd_fold_real__Intercept"))+
+  ggtitle(paste("Posterior Markov Chain Monte Carlo trace plots", error_names[[i]], sep = " "))
+ggsave(paste("plots/MCMC_trace_", str_replace_all(error_names[i], " ", "_"), ".png", sep = ""),
+       plot = MCMC_plot, device = "png")
+
+```
+

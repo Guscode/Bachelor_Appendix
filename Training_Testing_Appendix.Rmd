@@ -1,0 +1,569 @@
+#This Script Trains and tests the Random Forest classifiers and saves the results in RDA's. The script was executed using the CHCAA server provided by Interacting Minds Center at Aarhus University.
+
+
+---
+title: "DK_BC"
+output: html_document
+---
+###Creating classifier for backchanneling in Danish
+```{r}
+#loading packages
+install.packages("pacman")
+library(pacman)
+p_load(gtools, e1071, randomForest, RCurl, caret, tm, quanteda, tidyverse)
+#loading data
+dk_bc <- read.csv("df_DK.csv")
+dk_bc$binary <- dk_bc$Backchannel
+```
+
+Cleaning text
+```{r}
+#Removing punctuation and numbers, as Random Forest can't deal with them
+dk_bc$Transcription <-  gsub('[[:punct:] ]+',' ',dk_bc$Transcription)
+dk_bc$Transcription <-  gsub('\\d+','tal',dk_bc$Transcription)
+```
+
+Assigning wordlists
+```{r}
+#Column names for result df
+coln <- c("Accuracy","Kappa","AccuracyLower","AccuracyUpper","AccuracyNull","AccuracyPValue","McnemarPValue","Sensitivity","Specificity","Pos Pred Value","Neg Pred Value","Precision","Recall","F1","Prevalence","Detection Rate",
+          "Detection Prevalence","Balanced Accuracy")
+#words and characters the randomForest function cant handle
+bad_rf <- c(")", "(", ",", "?", "for", "in", ".","!", "<", ">", "+", "-", "'", "_")
+```
+
+#Creating empty lists and data frame for storing results
+```{r}
+#Dataframes for performance metrics
+rf_df <- as.data.frame(matrix(0, ncol = 18))
+names(rf_df) <- coln
+#Empty lists for all predictions                         
+preds_index <- list()
+#Empty list for importance df
+importance_df <- list()
+#Empty lists for confusion matrices
+rf_res <- list()
+```
+
+Looping
+```{r}
+#Creating list of pairs
+folds <- levels(as.factor(dk_bc$.folds))
+#Looping through all pairs
+for(i in 1:length(folds)){
+  
+  #Splitting train and test data
+  train.data <- dk_bc[!dk_bc$.folds==folds[i],]
+  test.data <- dk_bc[dk_bc$.folds==folds[i],]
+  
+  #Creating DTM from test data
+  freq99_t <- round(0.01*nrow(test.data)) #getting numeric value for using 99% most frequent words
+  corp_t <- corpus(as.character(test.data$Transcription))
+  dtm_t <- dfm(corp_t)
+  dtm_t <- dfm_trim(dtm_t, min_docfreq = freq99_t, verbose = TRUE)
+  dtm_t <- convert(dtm_t, to="tm")
+  dtm_df_t <- as.data.frame(as.matrix(dtm_t))
+  #Add binary and wordcount to dtm
+  dtm_df_t$binary <- test.data$binary
+  dtm_df_t$wordcount <- test.data$wordcount
+  #Creating DTM from training data
+  freq99 <- round(0.01*nrow(train.data))
+  corp <-corpus(as.character(train.data$Transcription))
+  dtm <- dfm(corp)
+  dtm <- dfm_trim(dtm, min_termfreq = freq99, verbose = TRUE)
+  dtm <- convert(dtm, to="tm")
+  dtm_df <- as.data.frame(as.matrix(dtm))
+  dtm_df <- dtm_df[,names(dtm_df) %in% names(dtm_df_t)]
+  
+  #Add binary and wordcount to dtm
+  dtm_df$binary <- train.data$binary
+  dtm_df$wordcount <- train.data$wordcount
+  
+  #Remove all columns random forest cant handle
+  if(length(which(names(dtm_df) %in% bad_rf)) !=0){
+    dtm_df <- dtm_df[,-which(names(dtm_df) %in% bad_rf)]
+  }
+  
+  #Running Random Forest classification
+  rf <- randomForest(formula = as.factor(binary)~., 
+                data = dtm_df, importance=TRUE,proximity=F) #CHECK
+  #Saving results
+  results_df <- data.frame(binary = dtm_df_t$binary, 
+                         rf_pred =predict(rf,dtm_df_t),
+                         index =test.data$index) 
+  
+  #Making confusion matrix
+  results_df$rf_pred <- factor(results_df$rf_pred, levels = c("1","0"))
+  results_df$binary <- factor(results_df$binary, levels = c("1","0"))
+  
+  cfm_rf <- confusionMatrix(
+  results_df$rf_pred,
+  results_df$binary,
+  positive = NULL,
+  dnn = c("final", "binary"),
+  prevalence = NULL,
+  mode = "sens_spec"
+  )
+  
+  #Saving performance metrics
+  rf_df <- rbind(rf_df,c(cfm_rf$overall,cfm_rf$byClass))
+  
+  #Saving results df in list
+  preds_index[[i]] <- results_df
+  
+  #Saving importance df
+  importance_df[[i]] <- as.data.frame(round(randomForest::importance(rf), 2))
+  #saving confusion matrices
+  rf_res[[i]] <- cfm_rf$table
+}
+save(rf_df,preds_index,importance_df,rf_res, file = "bc_dk.rda")
+```
+
+######################################
+"DK_BC_incl_prev"
+#######################################
+###Creating classifier for backchanneling in Danish
+```{r}
+#loading packages
+library(pacman)
+p_load(gtools, e1071, randomForest, RCurl, caret, tm, quanteda, tidyverse)
+
+#loading data
+dk_bc <- read.csv("df_DK.csv")
+dk_bc$binary <- dk_bc$Backchannel
+```
+
+Cleaning text
+```{r}
+#Removing punctuation and numbers, as Random Forest can't deal with them
+dk_bc$Transcription <-  gsub('[[:punct:] ]+',' ',dk_bc$Transcription)
+dk_bc$Transcription <-  gsub('\\d+','tal',dk_bc$Transcription)
+```
+
+Assigning wordlists
+```{r}
+#Column names for result df
+coln <- c("Accuracy","Kappa","AccuracyLower","AccuracyUpper","AccuracyNull","AccuracyPValue","McnemarPValue","Sensitivity","Specificity","Pos Pred Value","Neg Pred Value","Precision","Recall","F1","Prevalence","Detection Rate",
+          "Detection Prevalence","Balanced Accuracy")
+
+#words and characters the randomForest function cant handle
+bad_rf <- c(")", "(", ",", "?", "for", "in", ".","!", "<", ">", "+", "-", "'", "_")
+bad_rf <- c(bad_rf, paste(bad_rf, "_prev", sep=""))
+```
+
+#Creating empty lists and data frame for storing results
+```{r}
+#Dataframes for performance metrics
+rf_df <- as.data.frame(matrix(0, ncol = 18))
+names(rf_df) <- coln
+
+#Empty lists for all predictions                         
+preds_index <- list()
+
+#Empty list for importance df
+importance_df <- list()
+
+#Empty lists for confusion matrices
+rf_res <- list()
+```
+
+Looping
+```{r}
+#Creating list of folds
+folds <- levels(as.factor(dk_bc$.folds))
+
+#Looping through all pairs
+for(i in 1:length(folds)){
+  
+  #Splitting train and test data
+  train.data <- dk_bc[!dk_bc$.folds==folds[i],]
+  test.data <- dk_bc[dk_bc$.folds==folds[i],]
+  
+  #Creating DTM from test data
+  freq99_t <- round(0.01*nrow(test.data)) #getting numeric value for using 99% most frequent words
+  corp_t <- corpus(as.character(test.data$Transcription))
+  dtm_t <- dfm(corp_t)
+  dtm_t <- dfm_trim(dtm_t, min_docfreq = freq99_t, verbose = TRUE)
+  dtm_t <- convert(dtm_t, to="tm")
+  dtm_df_t <- as.data.frame(as.matrix(dtm_t))
+
+  #Creating DTM from training data previous sentence
+  corp_prev_t <- corpus(as.character(test.data$preceeding))
+  dtm_prev_t <- dfm(corp_prev_t)
+  dtm_prev_t <- dfm_trim(dtm_prev_t, min_termfreq = freq99_t, verbose = TRUE)
+  dtm_prev_t <- convert(dtm_prev_t, to="tm")
+  dtm_df_prev_t <- as.data.frame(as.matrix(dtm_prev_t))
+  names(dtm_df_prev_t) <- paste(names(dtm_df_prev_t), "_prev", sep = "")
+  dtm_df_t <- cbind(dtm_df_t, dtm_df_prev_t)
+
+  #Add binary and wordcount to dtm
+  dtm_df_t$binary <- test.data$binary
+  dtm_df_t$wordcount <- test.data$wordcount
+  dtm_df_t$wordcount_prev <- test.data$wordcount_prev
+  dtm_df_t$lex_align <- test.data$lex_align
+  dtm_df_t$struc_align <- test.data$struc_align
+  dtm_df_t$overlap <- test.data$overlap
+
+  #Creating DTM from training data
+  freq99 <- round(0.01*nrow(train.data))
+  corp <-corpus(as.character(train.data$Transcription))
+  dtm <- dfm(corp)
+  dtm <- dfm_trim(dtm, min_termfreq = freq99, verbose = TRUE)
+  dtm <- convert(dtm, to="tm")
+  dtm_df <- as.data.frame(as.matrix(dtm))
+
+  #Creating dtm from previous line
+  corp_prev <- corpus(as.character(train.data$preceeding))
+  dtm_prev <- dfm(corp_prev)
+  dtm_prev <- dfm_trim(dtm_prev, min_termfreq = freq99, verbose = TRUE)
+  dtm_prev <- convert(dtm_prev, to="tm")
+  dtm_df_prev <- as.data.frame(as.matrix(dtm_prev))
+  names(dtm_df_prev) <- paste(names(dtm_df_prev), "_prev", sep = "")
+  dtm_df <- cbind(dtm_df, dtm_df_prev)
+  dtm_df <- dtm_df[,names(dtm_df) %in% names(dtm_df_t)]
+
+  #Add binary, wordcount and alignment features to dtm
+  dtm_df$binary <- train.data$binary
+  dtm_df$wordcount <- train.data$wordcount
+  dtm_df$wordcount_prev <- train.data$wordcount_prev
+  dtm_df$lex_align <- train.data$lex_align
+  dtm_df$struc_align <- train.data$struc_align
+  dtm_df$overlap <- train.data$overlap
+
+  #Remove all columns random forest cant handle
+  if(length(which(names(dtm_df) %in% bad_rf)) !=0){
+    dtm_df <- dtm_df[,-which(names(dtm_df) %in% bad_rf)]
+  }
+  
+  #Running Random Forest classification
+  rf <- randomForest(formula = as.factor(binary)~., 
+                data = dtm_df, importance=TRUE,proximity=F) #CHECK
+
+  #Saving results
+  results_df <- data.frame(binary = dtm_df_t$binary, 
+                         rf_pred =predict(rf,dtm_df_t),
+                         index =test.data$index) 
+  
+  #Making confusion matrix
+  results_df$rf_pred <- factor(results_df$rf_pred, levels = c("1","0"))
+  results_df$binary <- factor(results_df$binary, levels = c("1","0"))
+  
+  cfm_rf <- confusionMatrix(
+  results_df$rf_pred,
+  results_df$binary,
+  positive = NULL,
+  dnn = c("final", "binary"),
+  prevalence = NULL,
+  mode = "sens_spec"
+  )
+  print(paste("making random forest second bc, fold=", as.character(i), sep=" "))
+
+  #Saving performance metrics
+  rf_df <- rbind(rf_df,c(cfm_rf$overall,cfm_rf$byClass))
+  
+  #Saving results df in list
+  preds_index[[i]] <- results_df
+  
+  #Saving importance df
+  importance_df[[i]] <- as.data.frame(round(randomForest::importance(rf), 2))
+
+  #saving confusion matrices
+  rf_res[[i]] <- cfm_rf$table
+}
+print("dkprev_done")
+save(rf_df,preds_index, importance_df, rf_res,file =  "bc_dk_prev.rda")
+
+```
+ 
+#################
+title: "NO_BC"
+###################
+###Creating classifier for backchanneling in Danish
+```{r}
+#loading packages
+library(pacman)
+p_load(gtools, e1071, randomForest, RCurl, caret, tm, quanteda, tidyverse)
+
+#loading data
+no_bc <- read.csv("df_NO.csv")
+no_bc$binary <- no_bc$Backchannel
+```
+
+Cleaning text
+```{r}
+#Removing punctuation and numbers, as Random Forest can't deal with them
+no_bc$Transcription <-  gsub('[[:punct:] ]+',' ',no_bc$Transcription)
+no_bc$Transcription <-  gsub('\\d+','tal',no_bc$Transcription)
+```
+
+Assigning wordlists
+```{r}
+#Column names for result df
+coln <- c("Accuracy","Kappa","AccuracyLower","AccuracyUpper","AccuracyNull","AccuracyPValue","McnemarPValue","Sensitivity","Specificity","Pos Pred Value","Neg Pred Value","Precision","Recall","F1","Prevalence","Detection Rate",
+          "Detection Prevalence","Balanced Accuracy")
+
+#words and characters the randomForest function cant handle
+bad_rf <- c(")", "(", ",", "?", "for", "in", ".","!", "<", ">", "+", "-", "'", "_")
+```
+
+#Creating empty lists and data frame for storing results
+```{r}
+#Dataframes for performance metrics
+rf_df <- as.data.frame(matrix(0, ncol = 18))
+names(rf_df) <- coln
+
+#Empty lists for all predictions                         
+preds_index <- list()
+
+#Empty list for importance df
+importance_df <- list()
+
+#Empty lists for confusion matrices
+rf_res <- list()
+```
+
+Looping
+```{r}
+#Creating list of pairs
+folds <- levels(as.factor(no_bc$.folds))
+
+#Looping through all pairs
+for(i in 1:length(folds)){
+  
+  #Splitting train and test data
+  train.data <- no_bc[!no_bc$.folds==folds[i],]
+  test.data <- no_bc[no_bc$.folds==folds[i],]
+  
+  #Creating DTM from test data
+  freq99_t <- round(0.01*nrow(test.data)) #getting numeric value for using 99% most frequent words
+  corp_t <- corpus(as.character(test.data$Transcription))
+  dtm_t <- dfm(corp_t)
+  dtm_t <- dfm_trim(dtm_t, min_docfreq = freq99_t, verbose = TRUE)
+  dtm_t <- convert(dtm_t, to="tm")
+  dtm_df_t <- as.data.frame(as.matrix(dtm_t))
+
+  #Add binary and wordcount to dtm
+  dtm_df_t$binary <- test.data$binary
+  dtm_df_t$wordcount <- test.data$wordcount
+
+  #Creating DTM from training data
+  freq99 <- round(0.01*nrow(train.data))
+  corp <-corpus(as.character(train.data$Transcription))
+  dtm <- dfm(corp)
+  dtm <- dfm_trim(dtm, min_termfreq = freq99, verbose = TRUE)
+  dtm <- convert(dtm, to="tm")
+  dtm_df <- as.data.frame(as.matrix(dtm))
+  dtm_df <- dtm_df[,names(dtm_df) %in% names(dtm_df_t)]
+  
+  #Add binary and wordcount to dtm
+  dtm_df$binary <- train.data$binary
+  dtm_df$wordcount <- train.data$wordcount
+  
+  #Remove all columns random forest cant handle
+  if(length(which(names(dtm_df) %in% bad_rf)) !=0){
+    dtm_df <- dtm_df[,-which(names(dtm_df) %in% bad_rf)]
+  }
+  print(paste("making random forest third bc, fold=", as.character(i), sep=" "))
+
+  #Running Random Forest classification
+  rf <- randomForest(formula = as.factor(binary)~., 
+                data = dtm_df, importance=TRUE,proximity=F) #CHECK
+  #Saving results
+  results_df <- data.frame(binary = dtm_df_t$binary, 
+                         rf_pred =predict(rf,dtm_df_t),
+                         index =test.data$index) 
+  
+  #Making confusion matrix
+  results_df$rf_pred <- factor(results_df$rf_pred, levels = c("1","0"))
+  results_df$binary <- factor(results_df$binary, levels = c("1","0"))
+  
+  cfm_rf <- confusionMatrix(
+  results_df$rf_pred,
+  results_df$binary,
+  positive = NULL,
+  dnn = c("final", "binary"),
+  prevalence = NULL,
+  mode = "sens_spec"
+  )
+  
+  #Saving performance metrics
+  rf_df <- rbind(rf_df,c(cfm_rf$overall,cfm_rf$byClass))
+  
+  #Saving results df in list
+  preds_index[[i]] <- results_df
+  
+  #Saving importance df
+  importance_df[[i]] <- as.data.frame(round(randomForest::importance(rf), 2))
+
+  #saving confusion matrices
+  rf_res[[i]] <- cfm_rf$table
+}
+print("bc_no_done")
+save(rf_df,preds_index, importance_df, rf_res,file =  "bc_no.rda")
+```
+ 
+############################
+title: "DK_NO_incl_prev"
+############################
+
+###Creating classifier for backchanneling in Danish
+```{r}
+#loading packages
+library(pacman)
+p_load(gtools, e1071, randomForest, RCurl, caret, tm, quanteda, tidyverse)
+
+#loading data
+no_bc <- read.csv("df_NO.csv")
+no_bc$binary <- no_bc$Backchannel
+```
+
+Cleaning text
+```{r}
+#Removing punctuation and numbers, as Random Forest can't deal with them
+no_bc$Transcription <-  gsub('[[:punct:] ]+',' ',no_bc$Transcription)
+no_bc$Transcription <-  gsub('\\d+','tal',no_bc$Transcription)
+```
+
+Assigning wordlists
+```{r}
+#Column names for result df
+coln <- c("Accuracy","Kappa","AccuracyLower","AccuracyUpper","AccuracyNull","AccuracyPValue","McnemarPValue","Sensitivity","Specificity","Pos Pred Value","Neg Pred Value","Precision","Recall","F1","Prevalence","Detection Rate",
+          "Detection Prevalence","Balanced Accuracy")
+
+#words and characters the randomForest function cant handle
+bad_rf <- c(")", "(", ",", "?", "for", "in", ".","!", "<", ">", "+", "-", "'", "_")
+bad_rf <- c(bad_rf, paste(bad_rf, "_prev", sep=""))
+```
+
+#Creating empty lists and data frame for storing results
+```{r}
+#Dataframes for performance metrics
+rf_df <- as.data.frame(matrix(0, ncol = 18))
+names(rf_df) <- coln
+
+#Empty lists for all predictions                         
+preds_index <- list()
+
+#Empty list for importance df
+importance_df <- list()
+
+#Empty lists for confusion matrices
+rf_res <- list()
+```
+
+Looping
+```{r}
+#Creating list of pairs
+folds <- levels(as.factor(no_bc$.folds))
+
+#Looping through all pairs
+for(i in 1:length(folds)){
+  
+  #Splitting train and test data
+  train.data <- no_bc[!no_bc$.folds==folds[i],]
+  test.data <- no_bc[no_bc$.folds==folds[i],]
+  
+  #Creating DTM from test data
+  freq99_t <- round(0.01*nrow(test.data)) #getting numeric value for using 99% most frequent words
+  corp_t <- corpus(as.character(test.data$Transcription))
+  dtm_t <- dfm(corp_t)
+  dtm_t <- dfm_trim(dtm_t, min_docfreq = freq99_t, verbose = TRUE)
+  dtm_t <- convert(dtm_t, to="tm")
+  dtm_df_t <- as.data.frame(as.matrix(dtm_t))
+
+  #Creating DTM from training data previous sentence
+  corp_prev_t <- corpus(as.character(test.data$preceeding))
+  dtm_prev_t <- dfm(corp_prev_t)
+  dtm_prev_t <- dfm_trim(dtm_prev_t, min_termfreq = freq99_t, verbose = TRUE)
+  dtm_prev_t <- convert(dtm_prev_t, to="tm")
+  dtm_df_prev_t <- as.data.frame(as.matrix(dtm_prev_t))
+  names(dtm_df_prev_t) <- paste(names(dtm_df_prev_t), "_prev", sep = "")
+  dtm_df_t <- cbind(dtm_df_t, dtm_df_prev_t)
+
+  #Add binary and wordcount to dtm
+  dtm_df_t$binary <- test.data$binary
+  dtm_df_t$wordcount <- test.data$wordcount
+  dtm_df_t$wordcount_prev <- test.data$wordcount_prev
+  dtm_df_t$lex_align <- test.data$lex_align
+  dtm_df_t$struc_align <- test.data$struc_align
+  dtm_df_t$overlap <- test.data$overlap
+
+
+  #Creating DTM from training data
+  freq99 <- round(0.01*nrow(train.data))
+  corp <-corpus(as.character(train.data$Transcription))
+  dtm <- dfm(corp)
+  dtm <- dfm_trim(dtm, min_termfreq = freq99, verbose = TRUE)
+  dtm <- convert(dtm, to="tm")
+  dtm_df <- as.data.frame(as.matrix(dtm))
+
+  #Creating dtm from previous line
+  corp_prev <- corpus(as.character(train.data$preceeding))
+  dtm_prev <- dfm(corp_prev)
+  dtm_prev <- dfm_trim(dtm_prev, min_termfreq = freq99, verbose = TRUE)
+  dtm_prev <- convert(dtm_prev, to="tm")
+  dtm_df_prev <- as.data.frame(as.matrix(dtm_prev))
+  names(dtm_df_prev) <- paste(names(dtm_df_prev), "_prev", sep = "")
+  dtm_df <- cbind(dtm_df, dtm_df_prev)
+  dtm_df <- dtm_df[,names(dtm_df) %in% names(dtm_df_t)]
+
+  #Add binary, wordcount and alignment features to dtm
+  dtm_df$binary <- train.data$binary
+  dtm_df$wordcount <- train.data$wordcount
+  dtm_df$wordcount_prev <- train.data$wordcount_prev
+  dtm_df$lex_align <- train.data$lex_align
+  dtm_df$struc_align <- train.data$struc_align
+  dtm_df$overlap <- train.data$overlap
+
+  #Remove all columns random forest cant handle
+  if(length(which(names(dtm_df) %in% bad_rf)) !=0){
+    dtm_df <- dtm_df[,-which(names(dtm_df) %in% bad_rf)]
+  }
+  print(paste("making random forest fourth bc, fold=", as.character(i), sep=" "))
+
+  #Running Random Forest classification
+  rf <- randomForest(formula = as.factor(binary)~., 
+                data = dtm_df, importance=TRUE,proximity=F) #CHECK
+
+  #Saving results
+  results_df <- data.frame(binary = dtm_df_t$binary, 
+                         rf_pred =predict(rf,dtm_df_t),
+                         index =test.data$index) 
+  
+  #Making confusion matrix
+  results_df$rf_pred <- factor(results_df$rf_pred, levels = c("1","0"))
+  results_df$binary <- factor(results_df$binary, levels = c("1","0"))
+  
+  cfm_rf <- confusionMatrix(
+  results_df$rf_pred,
+  results_df$binary,
+  positive = NULL,
+  dnn = c("final", "binary"),
+  prevalence = NULL,
+  mode = "sens_spec"
+  )
+  
+  #Saving performance metrics
+  rf_df <- rbind(rf_df,c(cfm_rf$overall,cfm_rf$byClass))
+  
+  #Saving results df in list
+  preds_index[[i]] <- results_df
+  
+  #Saving importance df
+  importance_df[[i]] <- as.data.frame(round(randomForest::importance(rf), 2))
+
+  #saving confusion matrices
+  rf_res[[i]] <- cfm_rf$table
+}
+
+print("bc_no_prev_done")
+save(rf_df,preds_index, importance_df, rf_res,file =  "bc_no_prev.rda")
+
+```
+
+ 
+ 
+ 
+ 
+ 
+ 

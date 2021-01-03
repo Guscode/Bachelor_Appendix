@@ -1,0 +1,385 @@
+---
+title: "DataCleaning"
+output: html_document
+---
+
+This Markdown includes all data cleaning steps carried out before Training and testing models.
+
+#Loading packages
+```{r}
+library(pacman)
+p_load(readxl,retistruct)
+p_load("quanteda")
+p_load("ggplot2")
+p_load("tidyverse")
+p_load("tidytext")
+p_load("tidyr")
+p_load("readtext")
+p_load("stringr")
+p_load("stm")
+p_load("topicmodels")
+p_load("beepr")
+p_load("stringr")
+p_load("DataCombine")
+p_load(stringr)
+p_load(plyr)
+p_load(dplyr)
+p_load(ggplot2)
+p_load(lubridate)
+p_load(readr)
+p_load(caret, ROCR, MuMIn)
+p_load(wordcloud)
+p_load(groupdata2)
+```
+
+
+#General datacleaning and adding preceding sentence
+```{r}
+library(tidyverse)
+df <- read_delim("Merged_Data_060820 (1).txt", delim="\t")
+df2 <- read_delim("study_17_081119.txt", delim="/")
+df <- df %>% 
+  mutate(ID = paste(Pair, Session, sep = "_")) %>%  
+  filter(ID != "1_2") #removing session containing both danish and norwegian, as well as containing far more utterances than other sessions
+  
+#adding missing columns
+df2 <- df2 %>% 
+  mutate(Language = "Dansk",
+         ID = paste(Study, Pair, sep = "_")) #creating unique pair ID
+#Ensuring data classes are consistent between dataframes
+df$Pair <- as.character(df$Pair)
+df$starttime <- as.character(df$starttime)
+df$endtime <- as.character(df$endtime)
+df$Backchannel <- as.character(df$Backchannel)
+df$Backchannel_alignment <- as.character(df$Backchannel_alignment)
+df2$Task <- as.character(df2$Task)
+df2$Pair <- as.character(df2$Pair)
+#bind rows with common columns
+df_unite <- bind_rows(
+  df[,colnames(df)%in%colnames(df2)],
+  df2[colnames(df[,colnames(df)%in%colnames(df2)])]
+)
+#remove potential NAs in pairs
+df_unite <- df_unite %>% 
+  filter(!is.na(df_unite$Pair))
+#recode mistakes in data
+df_unite$Backchannel[df_unite$Backchannel %in% c("x","X", "x (ja)")] <- 1 #x was not to be used in coding scheme 
+df_unite$Backchannel[is.na(df_unite$Backchannel)] <- 0 #the absence 
+df_unite$Backchannel_alignment[is.na(df_unite$Backchannel_alignment)] <- 0
+df_unite$Backchannel_alignment[df_unite$Backchannel_alignment %in% c("x","X")] <- 1
+df_unite$Open_repair[is.na(df_unite$Open_repair)] <- 0
+df_unite$Restricted_repair[is.na(df_unite$Restricted_repair)] <- 0
+df_unite$Restricted_solution[is.na(df_unite$Restricted_solution)] <- 0
+df_unite$OIOR[is.na(df_unite$OIOR)] <- 0
+df_unite$Task[!df_unite$Task %in% c("Spontaneous", "Task")] <- "Task"
+for (i in seq_along(df_unite$Pair)){
+  if(df_unite$Backchannel_alignment[i] == 1){
+    df_unite$Backchannel[i] <- 1
+  }
+}
+for (i in seq_along(df_unite$Pair)){
+  if(df_unite$Open_repair[i] == 1){
+    df_unite$Repair[i] <- 1
+  }
+  if(df_unite$Restricted_repair[i] == 1){
+    df_unite$Repair[i] <- 1
+  }
+  if(df_unite$Restricted_solution[i] == 1){
+    df_unite$Repair[i] <- 1
+  }
+  if(df_unite$OIOR[i] == 1){
+    df_unite$Repair[i] <- 1
+  }
+}
+
+df_unite <- df_unite %>% 
+  dplyr::group_by(ID) %>% 
+  dplyr::mutate(int_lead = lead(Interlocutor)) %>% 
+  ungroup()
+df_unite$change <- ifelse(df_unite$Interlocutor == df_unite$int_lead, 0, 1)
+changes <- which(df_unite$change == 1)
+k_sequence <- df_unite %>% 
+  mutate(index = 1:nrow(df_unite))
+df_unite$preceeding <- ""
+
+#Adding Preceding sentence without overlapping conversations
+for (i in seq_along(changes)){
+  k_seq <- k_sequence %>% 
+    filter(index>changes[i] & index<=changes[i+1])
+  for (k in seq_along(k_seq$Pair)){
+  #if(df_unite$Backchannel[k_seq$index[k]] == 1){
+    df_unite$preceeding[k_seq$index[k]] <- df_unite$Transcription[changes[i]]
+   # }
+  }
+}
+na_changes <- which(is.na(df_unite$int_lead))
+for(i in seq_along(na_changes)){
+  print(i)
+  j <- na_changes[i]+1
+  while(df_unite$Interlocutor[j] == df_unite$Interlocutor[na_changes[i]+1]){
+    df_unite$preceeding[j] <- ""
+    j <- j+1
+  }
+}
+
+```
+
+
+#Adding word count, Lexical alignment and structural alignment to danish sentences
+```{r}
+#Subsetting Danish data
+df_DK <- df_unite %>% 
+  filter(Language == "Dansk")
+#Adding unique index
+df_DK$index <- 1:nrow(df_DK)
+#Making 'turn' column, as the same interlocutor sometimes has multiple utterances in a row
+df_DK$turn <- 0
+c <- 0
+for(i in 2:nrow(df_DK)){
+  int <- as.character(df_DK$Interlocutor[i])
+  nint <- as.character(df_DK$Interlocutor[i+1])
+  pint <- as.character(df_DK$Interlocutor[i-1])
+  if(int != pint){
+    c <- c+1
+  }
+  df_DK$turn[i] <- c
+}
+#Loading the Danish Udpipe model for lemmatization and part of speech tags
+model <- udpipe_download_model(language = "danish")
+model <- udpipe_load_model(file = model$file_model)
+#List of content word tags for lexical alignment
+content_words <- c("ADJ", "ADV", "NOUN", "VERB")
+#Counting amount of words per utterance
+df_DK$wordcount <- sapply(strsplit(df_DK$Transcription, " "), length)
+#prepping the loop
+prev <- c(" ")
+prev_upos <- c(" ")
+df_DK$lex_align <- 0
+df_DK$struc_align <- 0
+#Looping through all turns
+for(trn in 0:max(df_DK$turn)){
+  these <- df_test[which(df_DK$turn == trn),] #Subsetting data for specific turn
+  hm <- udpipe::udpipe_annotate(model, these$Transcription) #Annotating the transcription with udpipe
+  hm <- as.data.frame(hm) #Making udpipe model into dataframe
+  words <- paste(hm[hm$upos %in% content_words,]$lemma, collapse = " ") #Pasting all content word-lemmas into one sentence 
+  c <- c(words,prev) #Combining this turn and previous turn sentences
+  corp_t <- corpus(as.character(c)) #Creating Corpus of sentences
+  dtm_t <- dfm(corp_t) #Creating document-term matrix
+  df <- quanteda::convert(dtm_t, "data.frame") #Converting to dataframe
+  
+  if(ncol(df)>1){  #if df isn't empty
+      df_DK[which(df_DK$turn==trn),]$lex_align <-  coop::cosine(as.numeric(df[1,-1]),
+                                                                as.numeric(df[2,-1])) #Calculating cosine similarity
+      prev <- words #Setting this sentence to previous for next iteration
+  } else { #if df is empty, alignment =0
+      df_DK[which(df_DK$turn==trn),]$lex_align <- 0
+      prev <- " "
+    }
+  if(sum(these$wordcount)>1){ #If there are more than one words in a turn 
+    upos <- paste(unlist(lapply(ngrams(hm$upos,n=2:3),
+                                FUN=paste, collapse="_")), collapse=" ") #Make all POS tags into Ngrams in a sentence
+    c_upos <- c(upos, prev_upos) #Combine Ngrams from  this turn with Ngrams from previous turn
+    corp_upos <- corpus(as.character(c_upos)) #Make corpus
+    dtm_upos <- dfm(corp_upos) #Make Document-term matrix
+    df_upos <- quanteda::convert(dtm_upos, "data.frame") #Convert to data frame
+    df_DK[which(df_DK$turn==trn),]$struc_align <-  coop::cosine(as.numeric(df_upos[1,-1]),
+                                                                   as.numeric(df_upos[2,-1])) #Calculate cosine alignment for ngrams
+    prev_upos <- upos #Set to previous
+  } else{ #If there are only one word in the turn struc_align=0
+    df_DK[which(df_DK$turn==trn),]$struc_align <- 0
+    prev_upos <- ""
+  }
+}
+df_DK$lex_align <- ifelse(is.nan(df_DK$lex_align),0,df_DK$lex_align) #Making NaN's 0
+df_DK$struc_align <- ifelse(is.nan(df_DK$struc_align),0,df_DK$struc_align) #Making NaN's 0
+na_changes <- which(is.na(df_DK$int_lead)) #Making sure every alignment score in the beginning of a new session is 0
+for(i in seq_along(na_changes)){
+  print(i)
+  j <- na_changes[i]+1
+  while(df_DK$Interlocutor[j] == df_DK$Interlocutor[na_changes[i]+1]){
+    df_DK$lex_align[j] <- 0
+    df_DK$struc_align[j] <- 0
+    j <- j+1
+  }
+}
+write.csv(df_DK, "df_DK.csv", fileEncoding = "UTF-8")
+```
+
+
+#Adding word count, Lexical alignment and structural alignment to Norwegian sentences
+```{r}
+#Subsetting Danish data
+df_NO <- df_unite %>% 
+  filter(Language == "Norsk")
+#Adding unique index
+df_NO$index <- 1:nrow(df_NO)
+#Making 'turn' column, as the same interlocutor sometimes has multiple utterances in a row
+df_NO$turn <- 0
+c <- 0
+for(i in 2:nrow(df_NO)){
+  int <- as.character(df_NO$Interlocutor[i])
+  nint <- as.character(df_NO$Interlocutor[i+1])
+  pint <- as.character(df_NO$Interlocutor[i-1])
+  if(int != pint){
+    c <- c+1
+  }
+  df_NO$turn[i] <- c
+}
+#Loading the Danish Udpipe model for lemmatization and part of speech tags
+model_no <- udpipe_download_model(language = "norwegian-bokmaal")
+model_no <- udpipe_load_model(file = model_no$file_model)
+#List of content word tags for lexical alignment
+content_words <- c("ADJ", "ADV", "NOUN", "VERB")
+#Counting amount of words per utterance
+df_NO$wordcount <- sapply(strsplit(df_NO$Transcription, " "), length)
+#prepping the loop
+prev <- c(" ")
+prev_upos <- c(" ")
+df_NO$lex_align <- 0
+df_NO$struc_align <- 0
+#Looping through all turns
+for(trn in 0:max(df_NO$turn)){
+  these <- df_NO[which(df_NO$turn == trn),] #Subsetting data for specific turn
+  hm <- udpipe::udpipe_annotate(model_no, these$Transcription) #Annotating the transcription with udpipe
+  hm <- as.data.frame(hm) #Making udpipe model into dataframe
+  words <- paste(hm[hm$upos %in% content_words,]$lemma, collapse = " ") #Pasting all content word-lemmas into one sentence 
+  c <- c(words,prev) #Combining this turn and previous turn sentences
+  corp_t <- corpus(as.character(c)) #Creating Corpus of sentences
+  dtm_t <- dfm(corp_t) #Creating document-term matrix
+  df <- quanteda::convert(dtm_t, "data.frame") #Converting to dataframe
+  
+  if(ncol(df)>1){  #if df isn't empty
+      df_NO[which(df_NO$turn==trn),]$lex_align <-  coop::cosine(as.numeric(df[1,-1]),
+                                                                as.numeric(df[2,-1])) #Calculating cosine similarity
+      prev <- words #Setting this sentence to previous for next iteration
+  } else { #if df is empty, alignment =0
+      df_NO[which(df_NO$turn==trn),]$lex_align <- 0
+      prev <- " "
+    }
+  if(sum(these$wordcount)>1){ #If there are more than one words in a turn 
+    upos <- paste(unlist(lapply(ngrams(hm$upos,n=2:3),
+                                FUN=paste, collapse="_")), collapse=" ") #Make all POS tags into Ngrams in a sentence
+    c_upos <- c(upos, prev_upos) #Combine Ngrams from  this turn with Ngrams from previous turn
+    corp_upos <- corpus(as.character(c_upos)) #Make corpus
+    dtm_upos <- dfm(corp_upos) #Make Document-term matrix
+    df_upos <- quanteda::convert(dtm_upos, "data.frame") #Convert to data frame
+    df_NO[which(df_NO$turn==trn),]$struc_align <-  coop::cosine(as.numeric(df_upos[1,-1]),
+                                                                   as.numeric(df_upos[2,-1])) #Calculate cosine alignment for ngrams
+    prev_upos <- upos #Set to previous
+  } else{ #If there are only one word in the turn struc_align=0
+    df_NO[which(df_NO$turn==trn),]$struc_align <- 0
+    prev_upos <- ""
+  }
+}
+df_NO$lex_align <- ifelse(is.nan(df_NO$lex_align),0,df_NO$lex_align) #Making NaN's 0
+df_NO$struc_align <- ifelse(is.nan(df_NO$struc_align),0,df_NO$struc_align) #Making NaN's 0
+na_changes <- which(is.na(df_NO$int_lead)) #Making sure every alignment score in the beginning of a new session is 0
+for(i in seq_along(na_changes)){
+  print(i)
+  j <- na_changes[i]+1
+  while(df_NO$Interlocutor[j] == df_NO$Interlocutor[na_changes[i]+1]){
+    df_NO$lex_align[j] <- 0
+    df_NO$struc_align[j] <- 0
+    j <- j+1
+  }
+}
+```
+
+
+Creating overlap variable, telling the model whether an utterance was started before the previous ended
+```{r}
+
+df_DK <- read.csv("df_DK.csv")
+
+df_DK$overlap <- 0
+for(i in 3:nrow(df_DK)){
+  this <- df_DK[i,]#Subsetting data for specific turn
+  trn <- this$turn
+  if(trn>3){
+    prev <- df_DK[which(df_DK$turn == trn-1),]
+    end <- prev[nrow(prev),]$endtime
+    start <- this$starttime
+    df_DK$overlap[i] <- end-start
+  } 
+}
+df_DK$overlap <- ifelse(df_DK$overlap<=0, 0,1)
+
+df_NO <- read.csv("df_NO.csv")
+
+df_NO$overlap <- 0
+for(i in 3:nrow(df_NO)){
+  this <- df_NO[i,]#Subsetting data for specific turn
+  trn <- this$turn
+  if(trn>3){
+    prev <- df_NO[which(df_NO$turn == trn-1),]
+    end <- prev[nrow(prev),]$endtime
+    start <- this$starttime
+    df_NO$overlap[i] <- end-start
+  } 
+}
+df_NO$overlap <- ifelse(df_NO$overlap<=0, 0,1)
+
+```
+
+#Making specific tokens for different versions of 'nå', as shown in coding scheme
+```{r}
+df_DK$Transcription <- gsub("nå →|nå→|nå -->|nå-->|Nå →|Nå→|Nå -->|Nå-->|nå->|nå ->|Nå->|Nå ->", "nåpil", df_DK$Transcription)
+df_DK$Transcription <- gsub("nå↗|nå ↗", "nåpilop",df_DK$Transcription)
+```
+
+
+```{r}
+#Adding index numbers 
+df_DK$index <- 1:nrow(df_DK)
+
+#Creating folds for danish data
+df_DK2 <- df_DK %>% 
+  group_by(Pair) %>% 
+  summarise(n_utt = n(), n_rep = sum(Repair)) %>% 
+  mutate(freq = n_rep/n_utt) %>% 
+  left_join(df_DK)
+df_DK2$Pair <- as.factor(df_DK2$Pair)
+df_DK <- groupdata2::fold(df_DK2, k = 10,
+                 id_col = "Pair",
+                 num_col = "n_utt")
+df_DK <- df_DK %>% 
+  dplyr::group_by(ID) %>% 
+  dplyr::mutate(lex_follow = lead(lex_align),
+                struc_follow = lead(struc_align)) %>% 
+  ungroup()
+  
+(Balance_df <- df_DK %>% 
+  group_by(.folds, Pair) %>% 
+  summarise(u = n(),
+            rep = sum(Repair))  %>% 
+  ungroup(Pair) %>% 
+  summarise(sum_utt = sum(u, na.rm = T),
+            sum_rep = sum(rep, na.rm = T),
+            n_pair = max(seq_along(unique(Pair)))) %>%  
+  mutate(group_freq = sum_rep/sum_utt))
+
+write.csv(df_DK, "df_DK.csv", fileEncoding = "UTF-8")
+
+###Creating Folds for Norwegian data
+df_NO$index <- 1:nrow(df_NO)
+df_NO2 <- df_NO %>% 
+  group_by(Pair) %>% 
+  summarise(n_utt = n(), n_rep = sum(Repair)) %>% 
+  mutate(freq = n_rep/n_utt) %>% 
+  left_join(df_NO)
+df_NO2$Pair <- as.factor(df_NO2$Pair)
+df_NO <- groupdata2::fold(df_NO2, k = 10,
+                 id_col = "Pair",
+                 num_col = "n_utt")
+(Balance_df <- df_NO %>% 
+  group_by(.folds, Pair) %>% 
+  summarise(u = n(),
+            rep = sum(Repair))  %>% 
+  ungroup(Pair) %>% 
+  summarise(sum_utt = sum(u, na.rm = T),
+            sum_rep = sum(rep, na.rm = T),
+            n_pair = max(seq_along(unique(Pair)))) %>%  
+  mutate(group_freq = sum_rep/sum_utt))
+
+write.csv(df_NO, "df_NO.csv", fileEncoding = "UTF-8")
+```

@@ -1,0 +1,232 @@
+---
+title: "Error_analysis_appendix"
+output: html_document
+---
+This Markdown includes annotation of error categories for the three models in Danish and Norwegian. 
+
+Models 1 and 2 error analysis DK
+```{r}
+#Loading packages
+library(pacman)
+p_load(tidyverse, caret)
+
+#Loading data and results
+dk_bc <- read.csv("df_DK.csv")
+load("bc_dk.rda")
+preds_df <- bind_rows(preds_index)
+dk_bc <- left_join(dk_bc, preds_df[,-1], by="index")
+
+###Loading bc_dk_prev
+load("bc_dk_prev.rda")
+preds_df <- bind_rows(preds_index)
+names(preds_df)[2] <- "rf_pred_prev"
+dk_bc <- left_join(dk_bc, preds_df[,-1], by="index")
+
+###Pasting Backchannel column and prediction column
+dk_bc$res <- paste(dk_bc$Backchannel, dk_bc$rf_pred, sep="_")
+dk_bc$res_prev <- paste(dk_bc$Backchannel, dk_bc$rf_pred_prev, sep="_")
+
+###Indicating 5 most important words in Danish classifiers across all folds
+imp_words <- c("ja","okay","mm","nej","nå")
+
+###MODEL 1 ERROR ANALYSIS
+
+fp <- dk_bc[dk_bc$res =="0_1",]
+fn <- dk_bc[dk_bc$res =="1_0",]
+
+#False positives error analysis model 1
+fp$err_cat <- "other_fp"
+fp$err_cat <- ifelse(grepl("haha", tolower(fp$Transcription)), "laugh_fp",fp$err_cat )
+fp$err_cat <-  ifelse(grepl("ja|nej|okay|mm|nå",tolower(fp$Transcription)),"imp_word", fp$err_cat)
+
+#False negatives error analysis model 1
+fn$err_cat <- "other"
+fn$err_cat <- ifelse(grepl("haha", tolower(fn$Transcription)), "laugh",fn$err_cat )
+fn$err_cat <- ifelse(fn$Backchannel_alignment==1, "bc_alignment",fn$err_cat )
+fn$err_cat <- ifelse(fn$wordcount==1 & word(tolower(fn$Transcription))!="haha", "rare_bc",fn$err_cat )
+fn$err_cat <- ifelse(gsub("([A-Za-zå]+).*", "\\1", tolower(as.character(fn$Transcription)))%in%imp_words,
+                     "joint_trans", fn$err_cat )
+model1_errors_dk <- rbind(fp,fn)
+
+###MODEL 2 ERROR ANALYSIS
+
+fp_prev <- dk_bc[dk_bc$res_prev =="0_1",]
+fn_prev <- dk_bc[dk_bc$res_prev =="1_0",]
+
+#False positives error analysis model 2
+fp_prev$err_cat <- "other_fp"
+fp_prev$err_cat <- ifelse(grepl("haha", tolower(fp_prev$Transcription)), "laugh_fp",fp_prev$err_cat )
+fp_prev$err_cat <-  ifelse(grepl("ja|nej|okay|mm|nå",tolower(fp_prev$Transcription)),"imp_word", fp_prev$err_cat)
+
+#False negatives error analysis model 2
+fn_prev$err_cat <- "other"
+fn_prev$err_cat <- ifelse(grepl("haha", tolower(fn_prev$Transcription)), "laugh",fn_prev$err_cat )
+fn_prev$err_cat <- ifelse(fn_prev$Backchannel_alignment==1, "bc_alignment",fn_prev$err_cat )
+fn_prev$err_cat <- ifelse(fn_prev$wordcount==1 & word(tolower(fn_prev$Transcription))!="haha", "rare_bc",fn_prev$err_cat )
+fn_prev$err_cat <- ifelse(gsub("([A-Za-zå]+).*", "\\1", tolower(as.character(fn_prev$Transcription)))%in%imp_words,
+                     "joint_trans", fn_prev$err_cat )
+model2_errors_dk <- rbind(fp_prev,fn_prev)
+```
+
+Model 3 error analysis DK
+```{r}
+dk_bc_brt$res <- paste(as.character(dk_bc_brt$Backchannel), as.character(dk_bc_brt$bert_preds), sep="_")
+###MODEL 3 ERROR ANALYSIS
+
+fp <- dk_bc_brt[dk_bc_brt$res =="0_1",]
+fn <- dk_bc_brt[dk_bc_brt$res =="1_0",]
+imp_words <- c("ja","okay","mm","nej","nå")
+
+#False positives error analysis model 1
+fp$err_cat <- "other_fp"
+fp$err_cat <- ifelse(grepl("haha", tolower(fp$Transcription)), "laugh_fp",fp$err_cat )
+fp$err_cat <-  ifelse(grepl("ja|nej|okay|mm|nå",tolower(fp$Transcription)),"imp_word", fp$err_cat)
+
+#False negatives error analysis model 1
+fn$err_cat <- "other"
+fn$err_cat <- ifelse(grepl("haha", tolower(fn$Transcription)), "laugh",fn$err_cat )
+fn$err_cat <- ifelse(fn$Backchannel_alignment==1, "bc_alignment",fn$err_cat )
+fn$err_cat <- ifelse(fn$wordcount==1 & word(tolower(fn$Transcription))!="haha", "rare_bc",fn$err_cat )
+fn$err_cat <- ifelse(gsub("([A-Za-zå]+).*", "\\1", tolower(as.character(fn$Transcription)))%in%imp_words,
+                     "joint_trans", fn$err_cat )
+modelbert_errors_dk <- rbind(fp,fn)
+```
+
+Models 1 and 2 error analysis NO
+```{r}
+#Loading data and results
+no_bc <- read.csv("df_NO.csv")
+load("bc_no.rda")
+fn[fn$err_cat=="rare_bc",]
+preds_df <- bind_rows(preds_index)
+no_bc <- left_join(no_bc, preds_df[,-1], by="index")
+
+###Loading bc_no_prev
+load("bc_no_prev.rda")
+preds_df <- bind_rows(preds_index)
+names(preds_df)[2] <- "rf_pred_prev"
+no_bc <- left_join(no_bc, preds_df[,-1], by="index")
+
+###Indicating 5 most important words in Norwegian classifiers across all folds
+imp_words <- c("ja","nei","okei","ok","mm")
+
+###Pasting Backchannel column and prediction column
+no_bc$res <- paste(no_bc$Backchannel, no_bc$rf_pred, sep="_")
+no_bc$res_prev <- paste(no_bc$Backchannel, no_bc$rf_pred_prev, sep="_")
+
+
+###MODEL 1 ERROR ANALYSIS
+
+fp <- no_bc[no_bc$res =="0_1",]
+fn <- no_bc[no_bc$res =="1_0",]
+
+#False positives error analysis model 1
+fp$err_cat <- "other_fp"
+fp$err_cat <- ifelse(grepl("haha", tolower(fp$Transcription)), "laugh_fp",fp$err_cat )
+fp$err_cat <-  ifelse(grepl("ja|nei|okei|ok|mm",tolower(fp$Transcription)),"imp_word", fp$err_cat)
+
+#False negatives error analysis model 1
+fn$err_cat <- "other"
+fn$err_cat <- ifelse(grepl("haha", tolower(fn$Transcription)), "laugh",fn$err_cat )
+fn$err_cat <- ifelse(fn$Backchannel_alignment==1, "bc_alignment",fn$err_cat )
+fn$err_cat <- ifelse(fn$wordcount==1& word(tolower(fn$Transcription))!="haha", "rare_bc",fn$err_cat )
+fn$err_cat <- ifelse(gsub("([A-Za-zå]+).*", "\\1", tolower(as.character(fn$Transcription)))%in%imp_words,
+                     "joint_trans", fn$err_cat )
+model1_errors_no <- rbind(fp,fn)
+
+
+###MODEL 2 ERROR ANALYSIS
+
+fp_prev <- no_bc[no_bc$res_prev =="0_1",]
+fn_prev <- no_bc[no_bc$res_prev =="1_0",]
+
+#False positives error analysis model 1
+fp_prev$err_cat <- "other_fp"
+fp_prev$err_cat <- ifelse(grepl("haha", tolower(fp_prev$Transcription)), "laugh_fp",fp_prev$err_cat )
+fp_prev$err_cat <-  ifelse(grepl("ja|nei|okei|ok|mm",tolower(fp_prev$Transcription)),"imp_word", fp_prev$err_cat)
+
+#False negatives error analysis model 1
+fn_prev$err_cat <- "other"
+fn_prev$err_cat <- ifelse(grepl("haha", tolower(fn_prev$Transcription)), "laugh",fn_prev$err_cat )
+fn_prev$err_cat <- ifelse(fn_prev$Backchannel_alignment==1, "bc_alignment",fn_prev$err_cat )
+fn_prev$err_cat <- ifelse(fn_prev$wordcount==1 &
+                            word(tolower(fn_prev$Transcription))!="haha", "rare_bc",fn_prev$err_cat )
+fn_prev$err_cat <- ifelse(gsub("([A-Za-zå]+).*", "\\1", tolower(as.character(fn_prev$Transcription)))%in%imp_words,
+                     "joint_trans", fn_prev$err_cat )
+model2_errors_no <- rbind(fp_prev,fn_prev)
+```
+
+Model 3 error analysis NO
+```{r}
+no_bc_brt
+no_bc_brt$res <- paste(as.character(no_bc_brt$Backchannel), as.character(no_bc_brt$bert_preds), sep="_")
+###MODEL 3 ERROR ANALYSIS
+
+fp <- no_bc_brt[no_bc_brt$res =="0_1",]
+fn <- no_bc_brt[no_bc_brt$res =="1_0",]
+imp_words <- c("ja","nei","okei","ok","mm")
+
+#False positives error analysis model 1
+fp$err_cat <- "other_fp"
+fp$err_cat <- ifelse(grepl("haha", tolower(fp$Transcription)), "laugh_fp",fp$err_cat )
+fp$err_cat <-  ifelse(grepl("ja|nei|okei|ok|mm",tolower(fp$Transcription)),"imp_word", fp$err_cat)
+
+#False negatives error analysis model 1
+fn$err_cat <- "other"
+fn$err_cat <- ifelse(grepl("haha", tolower(fn$Transcription)), "laugh",fn$err_cat )
+fn$err_cat <- ifelse(fn$Backchannel_alignment==1, "bc_alignment",fn$err_cat )
+fn$err_cat <- ifelse(fn$wordcount==1 & word(tolower(fn$Transcription))!="haha", "rare_bc",fn$err_cat )
+fn$err_cat <- ifelse(gsub("([A-Za-zå]+).*", "\\1", tolower(as.character(fn$Transcription)))%in%imp_words,
+                     "joint_trans", fn$err_cat )
+modelbert_errors_no <- rbind(fp,fn)
+```
+
+
+Compiling errors
+```{r}
+#Making dataset for compiling error categories and adding errors from model 1, true positives and true negatives
+dk_bc_err <- merge(x = dk_bc, y = model1_errors_dk[ ,c("index","err_cat")], by = "index", all.x=TRUE)
+dk_bc_err$err_cat <- ifelse(dk_bc_err$res=="1_1", "True_pos",dk_bc_err$err_cat )
+dk_bc_err$err_cat <- ifelse(dk_bc_err$res=="0_0", "True_neg",dk_bc_err$err_cat )
+
+#Adding errors for model 2
+names(model2_errors_dk)[44] <- "err_cat_M2"
+dk_bc_err <- merge(x = dk_bc_err, y = model2_errors_dk[ ,c("index","err_cat_M2")], by = "index", all.x=TRUE)
+dk_bc_err$err_cat_M2 <- ifelse(dk_bc_err$res_prev=="1_1", "True_pos",dk_bc_err$err_cat_M2 )
+dk_bc_err$err_cat_M2 <- ifelse(dk_bc_err$res_prev=="0_0", "True_neg",dk_bc_err$err_cat_M2 )
+
+#Adding errors for model 3
+names(modelbert_errors_dk)[45] <- "err_cat_bert"
+dk_bc_err <- merge(x = dk_bc_err, y = modelbert_errors_dk[ ,c("index","err_cat_bert")], by = "index", all.x=TRUE)
+dk_bc_err <- merge(x = dk_bc_err, y = dk_bc_brt[ ,c("index","bert_preds")], by = "index", all.x=TRUE)
+dk_bc_err$res_bert <- paste(as.character(dk_bc_err$Backchannel),as.character(dk_bc_err$bert_preds.y), sep="_")
+
+dk_bc_err$err_cat_bert <- ifelse(dk_bc_err$res_bert=="1_1", "True_pos",dk_bc_err$err_cat_bert )
+dk_bc_err$err_cat_bert <- ifelse(dk_bc_err$res_bert=="0_0", "True_neg",dk_bc_err$err_cat_bert )
+
+#Making dataset for compiling error categories and adding errors from model 1, true positives and true negatives
+no_bc_err <- no_bc
+names(model1_errors_no)[45] <- "err_cat"
+no_bc_err <- merge(x = no_bc_err, y = model1_errors_no[ ,c("index","err_cat")], by = "index", all.x=TRUE)
+no_bc_err$err_cat <- ifelse(no_bc$res=="1_1", "True_pos",no_bc_err$err_cat )
+no_bc_err$err_cat <- ifelse(no_bc$res=="0_0", "True_neg",no_bc_err$err_cat )
+
+#Adding errors for model 2
+names(model2_errors_no)[45] <- "err_cat_M2"
+no_bc_err <- merge(x = no_bc_err, y = model2_errors_no[ ,c("index","err_cat_M2")], by = "index", all.x=TRUE)
+no_bc_err$err_cat_M2 <- ifelse(no_bc$res_prev=="1_1", "True_pos",no_bc_err$err_cat_M2 )
+no_bc_err$err_cat_M2 <- ifelse(no_bc$res_prev=="0_0", "True_neg",no_bc_err$err_cat_M2 )
+
+#Adding errors for model 3
+names(modelbert_errors_no)[46] <- "err_cat_bert"
+no_bc_err <- merge(x = no_bc_err, y = modelbert_errors_no[ ,c("index","err_cat_bert")], by = "index", all.x=TRUE)
+no_bc_err$bert_preds <- no_bc_brt$bert_preds
+no_bc_err$res_bert <- paste(as.character(no_bc_err$Backchannel),as.character(no_bc_err$bert_preds), sep="_")
+
+no_bc_err$err_cat_bert <- ifelse(no_bc_err$res_bert=="1_1", "True_pos",no_bc_err$err_cat_bert )
+no_bc_err$err_cat_bert <- ifelse(no_bc_err$res_bert=="0_0", "True_neg",no_bc_err$err_cat_bert )
+
+
+#Saving the final error datasets
+save(no_bc_err,dk_bc_err, file = "Error_dataset_incl_true.rda")
+```
